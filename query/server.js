@@ -1,7 +1,10 @@
 ﻿// server.js is the starting point of the host process:
 //
 // `node server.js` 
-var colors = require('colors')
+var express = require('express')
+  , http = require('http')
+  , colors = require('colors')
+  , socket = require('socket.io')
   , viewmodel = require('viewmodel')
   , msgbus = require('servicebus').bus();
 
@@ -19,6 +22,22 @@ var options = {
         dbName: 'cqrssample'
     }
 };
+
+var app = express()
+  , server = http.createServer(app)
+  , io = socket.listen(server);
+
+var allowCrossDomain = function (req, res, next) {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+
+    next();
+}
+
+app.use(require('body-parser').json());
+app.use(express['static'](__dirname + '/'));
+app.use(allowCrossDomain);
 
 console.log('1. -> Configure viewmodel'.cyan);
 viewmodel.read(options.repository, function (err, repository) {
@@ -42,21 +61,35 @@ viewmodel.read(options.repository, function (err, repository) {
 
         console.log('3. -> message bus'.cyan);
         
-        // on receiving an __event__ from redis via the hub module:
-        //
-        // - let it be handled from the eventDenormalizer to update the viewmodel storage
         msgbus.subscribe("events", function (data) {
             console.log(colors.cyan('eventDenormalizer -- denormalize event ' + data.event));
             eventDenormalizer.handle(data);
         });
 
-        // on receiving an __event__ from eventDenormalizer module:
-        //
-        // - forward it to connected browsers via socket.io
+        msgbus.subscribe("viewmodels", function (evt) {
+            console.log(colors.magenta('\nsocket.io -- publish event ' + evt.event + ' to browser'));
+            io.sockets.emit(evt.collection, evt);
+        });
+
+        console.log('2. -> Configure routes'.cyan);
+        require('./routes').actions(app, repository);
+
+        console.log('3. -> Configure WebSockets connection'.cyan);
+        io.sockets.on('connection', function (socket) {
+            console.log(colors.magenta(' -- connects to socket.io'));
+
+            socket.on('commands', function (data) {
+                console.log(colors.magenta('\n -- sends command ' + data.command + ':'));
+                console.log(data);
+
+                msgbus.publish("commands", data);
+            });
+        });
+
         eventDenormalizer.onEvent(function (evt) {
             console.log(colors.magenta('\nsocket.io -- publish event ' + evt.event + ' to browser'));
             console.log(evt);
-            msgbus.publish("viewmodels", evt);
+            //msgbus.publish("viewmodels", evt);
         });
 
         eventDenormalizer.onNotification(function (notification) {
@@ -65,6 +98,9 @@ viewmodel.read(options.repository, function (err, repository) {
             msgbus.publish("viewmodels", notification);
         });
 
-        console.log('Starting query service'.cyan);
+        var port = 3001;
+        console.log(colors.cyan('\nStarting server on port ' + port));
+        server.listen(port);
     });
 });
+

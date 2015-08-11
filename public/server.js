@@ -15,9 +15,9 @@ var app = express()
   , io = socket.listen(server);
 
 app.use(require('body-parser').json());
-app.use(express['static'](__dirname + '/'));
+app.use(express['static'](__dirname + '/app/views'));
 
-app.set('view engine', 'jade');
+app.set("view options", {layout: false});
 app.set('views', __dirname + '/app/views');
 
 console.log('1. -> Configure routes'.cyan);
